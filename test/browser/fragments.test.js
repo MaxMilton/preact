@@ -8,8 +8,6 @@ import { logCall, clearLog, getLog } from '../_util/logCall';
 /* eslint-disable react/jsx-boolean-value */
 
 describe('Fragment', () => {
-	let expectDomLog = false;
-
 	/** @type {HTMLDivElement} */
 	let scratch;
 
@@ -19,9 +17,7 @@ describe('Fragment', () => {
 	let ops = [];
 
 	function expectDomLogToBe(expectedOperations, message) {
-		if (expectDomLog) {
-			expect(getLog()).to.deep.equal(expectedOperations, message);
-		}
+		expect(getLog()).to.deep.equal(expectedOperations, message);
 	}
 
 	class Stateful extends Component {
@@ -33,10 +29,14 @@ describe('Fragment', () => {
 		}
 	}
 
+	let resetInsertBefore;
+	let resetAppendChild;
+	let resetRemoveChild;
+
 	before(() => {
-		logCall(Node.prototype, 'insertBefore');
-		logCall(Node.prototype, 'appendChild');
-		logCall(Node.prototype, 'removeChild');
+		resetInsertBefore = logCall(Element.prototype, 'insertBefore');
+		resetAppendChild = logCall(Element.prototype, 'appendChild');
+		resetRemoveChild = logCall(Element.prototype, 'removeChild');
 		// logCall(CharacterData.prototype, 'remove');
 		// TODO: Consider logging setting set data
 		// ```
@@ -47,6 +47,12 @@ describe('Fragment', () => {
 		// 	set(value) { console.log('setData', value); orgData.set.call(this, value); }
 		// });
 		// ```
+	});
+
+	after(() => {
+		resetInsertBefore();
+		resetAppendChild();
+		resetRemoveChild();
 	});
 
 	beforeEach(() => {
@@ -220,18 +226,14 @@ describe('Fragment', () => {
 		}
 
 		render(<App />, scratch);
-		expect(scratch.innerHTML).to.equal(
-			div([span(1), span(2), span(2)].join(''))
-		);
+		expect(scratch.innerHTML).to.equal(div([span(1), span(2), span(2)]));
 
 		setState({ i: 1 });
 
 		clearLog();
 		rerender();
 
-		expect(scratch.innerHTML).to.equal(
-			div([div(1), span(2), span(2)].join(''))
-		);
+		expect(scratch.innerHTML).to.equal(div([div(1), span(2), span(2)]));
 		expectDomLogToBe([
 			'<div>.appendChild(#text)',
 			'<div>122.insertBefore(<div>1, <span>1)',
@@ -545,7 +547,7 @@ describe('Fragment', () => {
 		expect(scratch.innerHTML).to.equal('<div>Hello</div>');
 	});
 
-	it.skip('should not preserve state between array nested in fragment and double nested array', () => {
+	it('should not preserve state between array nested in fragment and double nested array', () => {
 		function Foo({ condition }) {
 			return condition ? (
 				<Fragment>{[<Stateful key="a" />]}</Fragment>
@@ -566,7 +568,7 @@ describe('Fragment', () => {
 		expect(scratch.innerHTML).to.equal('<div>Hello</div>');
 	});
 
-	it.skip('should preserve state between double nested fragment and double nested array', () => {
+	it('should preserve state between double nested fragment and double nested array', () => {
 		function Foo({ condition }) {
 			return condition ? (
 				<Fragment>
@@ -669,13 +671,9 @@ describe('Fragment', () => {
 			);
 		}
 
-		const htmlForTrue = div(
-			[div('foo'), div(div('Hello')), div('boop')].join('')
-		);
+		const htmlForTrue = div([div('foo'), div(div('Hello')), div('boop')]);
 
-		const htmlForFalse = div(
-			[div('beep'), div(div('Hello')), div('bar')].join('')
-		);
+		const htmlForFalse = div([div('beep'), div(div('Hello')), div('bar')]);
 
 		clearLog();
 		render(<Foo condition={true} />, scratch);
@@ -709,7 +707,7 @@ describe('Fragment', () => {
 		);
 	});
 
-	it('should not preserve state when switching to a keyed fragment to an array', () => {
+	it('should not preserve state when switching between a keyed fragment and an array', () => {
 		function Foo({ condition }) {
 			return condition ? (
 				<div>
@@ -729,7 +727,7 @@ describe('Fragment', () => {
 			);
 		}
 
-		const html = div([span('1'), div('Hello'), span('2')].join(''));
+		const html = div([span('1'), div('Hello'), span('2')]);
 
 		clearLog();
 		render(<Foo condition={true} />, scratch);
@@ -737,14 +735,14 @@ describe('Fragment', () => {
 		clearLog();
 		render(<Foo condition={false} />, scratch);
 
-		expect(ops).to.deep.equal([]);
+		expect(ops).to.deep.equal([]); // Component should not have updated (empty op log)
 		expect(scratch.innerHTML).to.equal(html);
 		expectDomLogToBe([
-			'<div>1Hello1.insertBefore(<span>1, <span>1)',
-			'<div>.appendChild(#text)',
-			'<div>11Hello.insertBefore(<div>Hello, <span>1)',
 			'<span>.appendChild(#text)',
-			'<div>1Hello1Hello.insertBefore(<span>2, <span>1)',
+			'<div>1Hello2.insertBefore(<span>1, <span>1)',
+			'<div>.appendChild(#text)',
+			'<div>11Hello2.insertBefore(<div>Hello, <span>1)',
+			'<div>1Hello1Hello2.insertBefore(<span>2, <span>1)',
 			'<span>1.remove()',
 			'<div>Hello.remove()'
 		]);
@@ -752,14 +750,15 @@ describe('Fragment', () => {
 		clearLog();
 		render(<Foo condition={true} />, scratch);
 
-		expect(ops).to.deep.equal([]);
+		expect(ops).to.deep.equal([]); // Component should not have updated (empty op log)
 		expect(scratch.innerHTML).to.equal(html);
 		expectDomLogToBe([
 			'<span>.appendChild(#text)',
 			'<div>1Hello2.insertBefore(<span>1, <span>1)',
 			'<div>.appendChild(#text)',
 			'<div>11Hello2.insertBefore(<div>Hello, <span>1)',
-			'<span>2.remove()',
+			'<div>1Hello1Hello2.insertBefore(<span>2, <span>1)',
+			'<span>1.remove()',
 			'<div>Hello.remove()'
 		]);
 	});
@@ -848,7 +847,7 @@ describe('Fragment', () => {
 		);
 
 		expect(scratch.innerHTML).to.equal(
-			div([div(0), div(1), div(2), div(3), div(4), div(5)].join(''))
+			div([div(0), div(1), div(2), div(3), div(4), div(5)])
 		);
 	});
 
@@ -973,17 +972,15 @@ describe('Fragment', () => {
 		render(<Todo />, scratch);
 
 		expect(scratch.innerHTML).to.equal(
-			ul(
-				[
-					li('A header'),
-					li('a'),
-					li('b'),
-					li('A divider'),
-					li('c'),
-					li('d'),
-					li('A footer')
-				].join('')
-			)
+			ul([
+				li('A header'),
+				li('a'),
+				li('b'),
+				li('A divider'),
+				li('c'),
+				li('d'),
+				li('A footer')
+			])
 		);
 	});
 
@@ -1127,7 +1124,7 @@ describe('Fragment', () => {
 			</ol>
 		);
 
-		const html = ol([li('0'), li('1'), li('2'), li('3')].join(''));
+		const html = ol([li('0'), li('1'), li('2'), li('3')]);
 
 		clearLog();
 		render(<Foo condition={true} />, scratch);
@@ -1150,32 +1147,12 @@ describe('Fragment', () => {
 		clearLog();
 		render(<Foo condition={false} />, scratch);
 		expect(scratch.innerHTML).to.equal(html, 'rendering from true to false');
-		expectDomLogToBe(
-			[
-				'<li>.appendChild(#text)',
-				'<ol>0121.appendChild(<li>2)',
-				'<li>.appendChild(#text)',
-				'<ol>01212.appendChild(<li>3)',
-				'<li>1.remove()',
-				'<li>2.remove()'
-			],
-			'rendering from true to false'
-		);
+		expectDomLogToBe([], 'rendering from true to false');
 
 		clearLog();
 		render(<Foo condition={true} />, scratch);
 		expect(scratch.innerHTML).to.equal(html, 'rendering from false to true');
-		expectDomLogToBe(
-			[
-				'<li>.appendChild(#text)',
-				'<ol>0123.insertBefore(<li>1, <li>1)',
-				'<li>.appendChild(#text)',
-				'<ol>01123.insertBefore(<li>2, <li>1)',
-				'<li>3.remove()',
-				'<li>1.remove()'
-			],
-			'rendering from false to true'
-		);
+		expectDomLogToBe([], 'rendering from false to true');
 	});
 
 	it('should support conditionally rendered Fragment or null', () => {
@@ -1193,11 +1170,9 @@ describe('Fragment', () => {
 			</ol>
 		);
 
-		const htmlForTrue = ol(
-			[li('0'), li('1'), li('2'), li('3'), li('4')].join('')
-		);
+		const htmlForTrue = ol([li('0'), li('1'), li('2'), li('3'), li('4')]);
 
-		const htmlForFalse = ol([li('0'), li('3'), li('4')].join(''));
+		const htmlForFalse = ol([li('0'), li('3'), li('4')]);
 
 		clearLog();
 		render(<Foo condition={true} />, scratch);
@@ -1274,13 +1249,23 @@ describe('Fragment', () => {
 			</ol>
 		);
 
-		const htmlForTrue = ol(
-			[li('0'), li('1'), li('2'), li('3'), li('4'), li('5')].join('')
-		);
+		const htmlForTrue = ol([
+			li('0'),
+			li('1'),
+			li('2'),
+			li('3'),
+			li('4'),
+			li('5')
+		]);
 
-		const htmlForFalse = ol(
-			[li('4'), li('5'), li('0'), li('1'), li('2'), li('3')].join('')
-		);
+		const htmlForFalse = ol([
+			li('4'),
+			li('5'),
+			li('0'),
+			li('1'),
+			li('2'),
+			li('3')
+		]);
 
 		clearLog();
 		render(<Foo condition={true} />, scratch);
@@ -1331,9 +1316,9 @@ describe('Fragment', () => {
 			</ol>
 		);
 
-		const htmlForTrue = ol([li(0), li(1), li(2), li(2)].join(''));
+		const htmlForTrue = ol([li(0), li(1), li(2), li(2)]);
 
-		const htmlForFalse = ol([li(2), li(2), li(3), li(4)].join(''));
+		const htmlForFalse = ol([li(2), li(2), li(3), li(4)]);
 
 		clearLog();
 		render(<Foo condition={true} />, scratch);
@@ -1402,9 +1387,9 @@ describe('Fragment', () => {
 			</ol>
 		);
 
-		const htmlForTrue = ol([li(0), li(1), li(2), li(3)].join(''));
+		const htmlForTrue = ol([li(0), li(1), li(2), li(3)]);
 
-		const htmlForFalse = ol([li(2), li(3), li(4), li(5)].join(''));
+		const htmlForFalse = ol([li(2), li(3), li(4), li(5)]);
 
 		clearLog();
 		render(<Foo condition={true} />, scratch);
@@ -1473,13 +1458,14 @@ describe('Fragment', () => {
 			);
 		}
 
-		const htmlForTrue = div(
-			[div('foo'), div(div('Hello')), div('boop'), div('boop')].join('')
-		);
+		const htmlForTrue = div([
+			div('foo'),
+			div(div('Hello')),
+			div('boop'),
+			div('boop')
+		]);
 
-		const htmlForFalse = div(
-			[div('beep'), div(div('Hello')), div('bar')].join('')
-		);
+		const htmlForFalse = div([div('beep'), div(div('Hello')), div('bar')]);
 
 		clearLog();
 		render(<Foo condition={true} />, scratch);
@@ -1551,25 +1537,21 @@ describe('Fragment', () => {
 			);
 		}
 
-		const htmlForTrue = div(
-			[
-				div('foo'),
-				div(div('Hello')),
-				div('boop'),
-				div('boop'),
-				div('boop')
-			].join('')
-		);
+		const htmlForTrue = div([
+			div('foo'),
+			div(div('Hello')),
+			div('boop'),
+			div('boop'),
+			div('boop')
+		]);
 
-		const htmlForFalse = div(
-			[
-				div('beep'),
-				div('beep'),
-				div('beep'),
-				div(div('Hello')),
-				div('bar')
-			].join('')
-		);
+		const htmlForFalse = div([
+			div('beep'),
+			div('beep'),
+			div('beep'),
+			div(div('Hello')),
+			div('bar')
+		]);
 
 		clearLog();
 		render(<Foo condition={true} />, scratch);
@@ -1612,7 +1594,7 @@ describe('Fragment', () => {
 		/**
 		 * @type {(props: { values: Array<string | number>}) => JSX.Element}
 		 */
-		const Foo = ({ values }) => ((
+		const Foo = ({ values }) => (
 			<ol>
 				<li>a</li>
 				<Fragment>
@@ -1622,10 +1604,10 @@ describe('Fragment', () => {
 				</Fragment>
 				<li>b</li>
 			</ol>
-		));
+		);
 
 		const getHtml = values =>
-			ol([li('a'), ...values.map(value => li(value)), li('b')].join(''));
+			ol([li('a'), ...values.map(value => li(value)), li('b')]);
 
 		let values = [0, 1, 2];
 		clearLog();
@@ -1678,7 +1660,7 @@ describe('Fragment', () => {
 
 		const htmlForTrue = [div(1), div(2)].join('');
 
-		const htmlForFalse = div([div(3), div(4)].join(''));
+		const htmlForFalse = div([div(3), div(4)]);
 
 		clearLog();
 		render(<Foo condition={true} />, scratch);
@@ -1750,11 +1732,16 @@ describe('Fragment', () => {
 			</ol>
 		);
 
-		const htmlForTrue = ol(
-			[li('0'), li('1'), li('2'), li('3'), li('4'), li('5')].join('')
-		);
+		const htmlForTrue = ol([
+			li('0'),
+			li('1'),
+			li('2'),
+			li('3'),
+			li('4'),
+			li('5')
+		]);
 
-		const htmlForFalse = ol([li('0'), li('1'), li('4'), li('5')].join(''));
+		const htmlForFalse = ol([li('0'), li('1'), li('4'), li('5')]);
 
 		clearLog();
 		render(<Foo condition={true} />, scratch);
@@ -1818,7 +1805,7 @@ describe('Fragment', () => {
 		);
 
 		render(<Foo />, scratch);
-		expect(scratch.innerHTML).to.equal(ol([li(1)].join('')));
+		expect(scratch.innerHTML).to.equal(ol(li(1)));
 	});
 
 	it('should properly render Components that return Fragments and use shouldComponentUpdate #1415', () => {
@@ -1862,7 +1849,7 @@ describe('Fragment', () => {
 			}
 		}
 
-		const successHtml = div(div([div(1), div(2), div(3)].join('')));
+		const successHtml = div(div([div(1), div(2), div(3)]));
 
 		const errorHtml = div(div('Error!'));
 
@@ -1886,7 +1873,7 @@ describe('Fragment', () => {
 		expect(scratch.innerHTML).to.equal(successHtml);
 	});
 
-	it('should use the last dom node for _lastDomChild', () => {
+	it('should properly render Fragments whose last child is a component returning null', () => {
 		let Noop = () => null;
 		let update;
 		class App extends Component {
@@ -2005,7 +1992,7 @@ describe('Fragment', () => {
 		);
 
 		expect(scratch.innerHTML).to.eql(
-			div([div('A'), div('B1'), div('B2'), div('C')].join(''))
+			div([div('A'), div('B1'), div('B2'), div('C')])
 		);
 
 		clearLog();
@@ -2013,7 +2000,7 @@ describe('Fragment', () => {
 		rerender();
 
 		expect(scratch.innerHTML).to.eql(
-			div([div('A'), section('B3'), section('B4'), div('C')].join(''))
+			div([div('A'), section('B3'), section('B4'), div('C')])
 		);
 		expectDomLogToBe([
 			'<section>.appendChild(#text)',
@@ -2458,17 +2445,14 @@ describe('Fragment', () => {
 
 		render(<App />, scratch);
 
-		expect(scratch.innerHTML).to.eql(
-			div([div('A'), div('C')].join('')),
-			'initial'
-		);
+		expect(scratch.innerHTML).to.eql(div([div('A'), div('C')]), 'initial');
 
 		clearLog();
 		updateB();
 		rerender();
 
 		expect(scratch.innerHTML).to.eql(
-			div([div('A'), div('B'), div('C')].join('')),
+			div([div('A'), div('B'), div('C')]),
 			'updateB'
 		);
 		expectDomLogToBe([
@@ -2481,7 +2465,7 @@ describe('Fragment', () => {
 		rerender();
 
 		expect(scratch.innerHTML).to.eql(
-			div([span('A2'), div('B'), div('C')].join('')),
+			div([span('A2'), div('B'), div('C')]),
 			'updateA'
 		);
 		expectDomLogToBe([
@@ -2561,6 +2545,261 @@ describe('Fragment', () => {
 		expectDomLogToBe([
 			'<div>.appendChild(#text)',
 			'<div>A3A4.appendChild(<div>B)'
+		]);
+	});
+
+	it('should properly place conditional elements around strictly equal vnodes', () => {
+		let set;
+
+		const Children = () => (
+			<Fragment>
+				<div>Navigation</div>
+				<div>Content</div>
+			</Fragment>
+		);
+
+		class Parent extends Component {
+			constructor(props) {
+				super(props);
+				this.state = { panelPosition: 'bottom' };
+				set = this.tooglePanelPosition = this.tooglePanelPosition.bind(this);
+			}
+
+			tooglePanelPosition() {
+				this.setState({
+					panelPosition: this.state.panelPosition === 'top' ? 'bottom' : 'top'
+				});
+			}
+
+			render() {
+				return (
+					<div>
+						{this.state.panelPosition === 'top' && <div>top panel</div>}
+						{this.props.children}
+						{this.state.panelPosition === 'bottom' && <div>bottom panel</div>}
+					</div>
+				);
+			}
+		}
+
+		const App = () => (
+			<Parent>
+				<Children />
+			</Parent>
+		);
+
+		const content = `<div>Navigation</div><div>Content</div>`;
+		const top = `<div><div>top panel</div>${content}</div>`;
+		const bottom = `<div>${content}<div>bottom panel</div></div>`;
+
+		render(<App />, scratch);
+		expect(scratch.innerHTML).to.equal(bottom);
+
+		clearLog();
+		set();
+		rerender();
+		expect(scratch.innerHTML).to.equal(top);
+		expectDomLogToBe([
+			'<div>.appendChild(#text)',
+			'<div>NavigationContentbottom panel.insertBefore(<div>top panel, <div>Navigation)',
+			'<div>bottom panel.remove()'
+		]);
+
+		clearLog();
+		set();
+		rerender();
+		expect(scratch.innerHTML).to.equal(bottom);
+		expectDomLogToBe([
+			'<div>.appendChild(#text)',
+			'<div>top panelNavigationContent.appendChild(<div>bottom panel)',
+			'<div>top panel.remove()'
+		]);
+
+		clearLog();
+		set();
+		rerender();
+		expect(scratch.innerHTML).to.equal(top);
+		expectDomLogToBe([
+			'<div>.appendChild(#text)',
+			'<div>NavigationContentbottom panel.insertBefore(<div>top panel, <div>Navigation)',
+			'<div>bottom panel.remove()'
+		]);
+	});
+
+	it('should efficiently unmount Fragment children', () => {
+		// <div>1 => <span>1 and Fragment sibling unmounts. Does <span>1 get correct _nextDom pointer?
+		function App({ condition }) {
+			return condition ? (
+				<div>
+					<Fragment>
+						<div>1</div>
+						<div>2</div>
+					</Fragment>
+					<Fragment>
+						<div>A</div>
+					</Fragment>
+				</div>
+			) : (
+				<div>
+					<Fragment>
+						<div>1</div>
+					</Fragment>
+					<Fragment>
+						<div>A</div>
+					</Fragment>
+				</div>
+			);
+		}
+
+		render(<App condition={true} />, scratch);
+		expect(scratch.innerHTML).to.equal(div([div(1), div(2), div('A')]));
+
+		clearLog();
+		render(<App condition={false} />, scratch);
+
+		expect(scratch.innerHTML).to.equal(div([div(1), div('A')]));
+		expectDomLogToBe(['<div>2.remove()']);
+	});
+
+	it('should efficiently unmount nested Fragment children', () => {
+		// Fragment wrapping <div>2 and <div>3 unmounts. Does <div>1 get correct
+		// _nextDom pointer to efficiently update DOM? _nextDom should be <div>A
+		function App({ condition }) {
+			return condition ? (
+				<div>
+					<Fragment>
+						<div>1</div>
+						<Fragment>
+							<div>2</div>
+							<div>3</div>
+						</Fragment>
+					</Fragment>
+					<Fragment>
+						<div>A</div>
+						<div>B</div>
+					</Fragment>
+				</div>
+			) : (
+				<div>
+					<Fragment>
+						<div>1</div>
+					</Fragment>
+					<Fragment>
+						<div>A</div>
+						<div>B</div>
+					</Fragment>
+				</div>
+			);
+		}
+
+		clearLog();
+		render(<App condition={true} />, scratch);
+		expect(scratch.innerHTML).to.equal(
+			div([div(1), div(2), div(3), div('A'), div('B')])
+		);
+
+		clearLog();
+		render(<App condition={false} />, scratch);
+
+		expect(scratch.innerHTML).to.equal(div([div(1), div('A'), div('B')]));
+		expectDomLogToBe(['<div>2.remove()', '<div>3.remove()']);
+	});
+
+	it('should efficiently place new children and unmount nested Fragment children', () => {
+		// <div>4 is added and Fragment sibling unmounts. Does <div>4 get correct _nextDom pointer?
+		function App({ condition }) {
+			return condition ? (
+				<div>
+					<Fragment>
+						<div>1</div>
+						<Fragment>
+							<div>2</div>
+							<div>3</div>
+						</Fragment>
+					</Fragment>
+					<Fragment>
+						<div>A</div>
+						<div>B</div>
+					</Fragment>
+				</div>
+			) : (
+				<div>
+					<Fragment>
+						<div>1</div>
+						<div>4</div>
+					</Fragment>
+					<Fragment>
+						<div>A</div>
+						<div>B</div>
+					</Fragment>
+				</div>
+			);
+		}
+
+		render(<App condition={true} />, scratch);
+		expect(scratch.innerHTML).to.equal(
+			div([div(1), div(2), div(3), div('A'), div('B')])
+		);
+
+		clearLog();
+		render(<App condition={false} />, scratch);
+
+		expect(scratch.innerHTML).to.equal(
+			div([div(1), div(4), div('A'), div('B')])
+		);
+		expectDomLogToBe([
+			'<div>.appendChild(#text)',
+			'<div>123AB.insertBefore(<div>4, <div>2)',
+			'<div>2.remove()',
+			'<div>3.remove()'
+		]);
+	});
+
+	it('should efficiently unmount nested Fragment children when changing node type', () => {
+		// <div>1 => <span>1 and Fragment sibling unmounts. Does <span>1 get correct _nextDom pointer?
+		function App({ condition }) {
+			return condition ? (
+				<div>
+					<Fragment>
+						<div>1</div>
+						<Fragment>
+							<div>2</div>
+							<div>3</div>
+						</Fragment>
+					</Fragment>
+					<Fragment>
+						<div>A</div>
+						<div>B</div>
+					</Fragment>
+				</div>
+			) : (
+				<div>
+					<Fragment>
+						<span>1</span>
+					</Fragment>
+					<Fragment>
+						<div>A</div>
+						<div>B</div>
+					</Fragment>
+				</div>
+			);
+		}
+
+		render(<App condition={true} />, scratch);
+		expect(scratch.innerHTML).to.equal(
+			div([div(1), div(2), div(3), div('A'), div('B')])
+		);
+
+		clearLog();
+		render(<App condition={false} />, scratch);
+
+		expect(scratch.innerHTML).to.equal(div([span(1), div('A'), div('B')]));
+		expectDomLogToBe([
+			'<span>.appendChild(#text)',
+			'<div>123AB.insertBefore(<span>1, <div>1)',
+			'<div>2.remove()',
+			'<div>3.remove()',
+			'<div>1.remove()'
 		]);
 	});
 });

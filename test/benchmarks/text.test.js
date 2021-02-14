@@ -1,12 +1,12 @@
-/*global coverage, ENABLE_PERFORMANCE */
+/*global COVERAGE, ENABLE_PERFORMANCE */
 /*eslint no-console:0*/
 /** @jsx createElement */
 
 import { setupScratch, teardown } from '../_util/helpers';
 import bench from '../_util/bench';
-const preact = require('../fixtures/preact');
-const ceviche = require('../../dist/preact');
-const MULTIPLIER = ENABLE_PERFORMANCE ? (coverage ? 5 : 1) : 999999;
+import preact8 from '../fixtures/preact';
+import * as preactX from '../../dist/preact.module';
+const MULTIPLIER = ENABLE_PERFORMANCE ? (COVERAGE ? 5 : 1) : 999999;
 
 describe('benchmarks', function() {
 	let scratch;
@@ -15,7 +15,7 @@ describe('benchmarks', function() {
 
 	before(function() {
 		if (!ENABLE_PERFORMANCE) this.skip();
-		if (coverage) {
+		if (COVERAGE) {
 			console.warn(
 				'WARNING: Code coverage is enabled, which dramatically reduces performance. Do not pay attention to these numbers.'
 			);
@@ -70,26 +70,26 @@ describe('benchmarks', function() {
 			};
 		}
 
-		const preactTest = createTest(preact);
-		const cevicheTest = createTest(ceviche);
+		const preact8Test = createTest(preact8);
+		const preactXTest = createTest(preactX);
 		const vanillaTest = createVanillaTest();
 
 		for (let i = 100; i--; ) {
-			preactTest(i);
-			cevicheTest(i);
+			preact8Test(i);
+			preactXTest(i);
 			vanillaTest(i);
 		}
 
 		bench(
 			{
 				vanilla: vanillaTest,
-				preact: preactTest,
-				ceviche: cevicheTest
+				preact8: preact8Test,
+				preactX: preactXTest
 			},
 			({ text, results }) => {
 				const THRESHOLD = 10 * MULTIPLIER;
-				// const slowdown = Math.sqrt(results.ceviche.hz * results.vanilla.hz);
-				const slowdown = results.vanilla.hz / results.ceviche.hz;
+				// const slowdown = Math.sqrt(results.preactX.hz * results.vanilla.hz);
+				const slowdown = results.vanilla.hz / results.preactX.hz;
 				console.log(
 					`in-place text update is ${slowdown.toFixed(2)}x slower:` + text
 				);

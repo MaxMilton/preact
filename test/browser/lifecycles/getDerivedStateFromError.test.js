@@ -1,11 +1,6 @@
 import { setupRerender } from 'preact/test-utils';
 import { createElement, render, Component } from 'preact';
-import {
-	setupScratch,
-	teardown,
-	spyAll,
-	resetAllSpies
-} from '../../_util/helpers';
+import { setupScratch, teardown } from '../../_util/helpers';
 
 /** @jsx createElement */
 
@@ -34,14 +29,9 @@ describe('Lifecycle methods', () => {
 		/** @type {typeof import('../../../').Component} */
 		let ThrowErr;
 
-		/** @type {Receiver} */
-		let receiver;
-		class Receiver extends Component {
-			constructor() {
-				super();
-				receiver = this;
-			}
+		let thrower;
 
+		class Receiver extends Component {
 			static getDerivedStateFromError(error) {
 				return { error };
 			}
@@ -52,8 +42,8 @@ describe('Lifecycle methods', () => {
 			}
 		}
 
-		spyAll(Receiver);
-		spyAll(Receiver.prototype);
+		sinon.spy(Receiver, 'getDerivedStateFromError');
+		sinon.spy(Receiver.prototype, 'render');
 
 		function throwExpectedError() {
 			throw (expectedError = new Error('Error!'));
@@ -61,6 +51,11 @@ describe('Lifecycle methods', () => {
 
 		beforeEach(() => {
 			ThrowErr = class ThrowErr extends Component {
+				constructor(props) {
+					super(props);
+					thrower = this;
+				}
+
 				static getDerivedStateFromError() {
 					expect.fail("Throwing component should not catch it's own error.");
 					return {};
@@ -72,10 +67,9 @@ describe('Lifecycle methods', () => {
 			sinon.spy(ThrowErr, 'getDerivedStateFromError');
 
 			expectedError = undefined;
-			receiver = undefined;
 
-			resetAllSpies(Receiver);
-			resetAllSpies(Receiver.prototype);
+			Receiver.getDerivedStateFromError.resetHistory();
+			Receiver.prototype.render.resetHistory();
 		});
 
 		afterEach(() => {
@@ -83,6 +77,7 @@ describe('Lifecycle methods', () => {
 				ThrowErr.getDerivedStateFromError,
 				"Throwing component should not catch it's own error."
 			).to.not.be.called;
+			thrower = undefined;
 		});
 
 		it('should be called when child fails in constructor', () => {
@@ -202,7 +197,7 @@ describe('Lifecycle methods', () => {
 				</Receiver>,
 				scratch
 			);
-			receiver.forceUpdate();
+			thrower.forceUpdate();
 			rerender();
 
 			expect(Receiver.getDerivedStateFromError).to.have.been.calledWith(
@@ -220,7 +215,7 @@ describe('Lifecycle methods', () => {
 				scratch
 			);
 
-			receiver.forceUpdate();
+			thrower.forceUpdate();
 			rerender();
 			expect(Receiver.getDerivedStateFromError).to.have.been.calledWith(
 				expectedError
@@ -237,7 +232,7 @@ describe('Lifecycle methods', () => {
 				scratch
 			);
 
-			receiver.forceUpdate();
+			thrower.forceUpdate();
 			rerender();
 			expect(Receiver.getDerivedStateFromError).to.have.been.calledWith(
 				expectedError

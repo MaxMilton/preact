@@ -1,8 +1,8 @@
 import { EMPTY_OBJ, EMPTY_ARR } from '../constants';
 import { Component } from '../component';
 import { Fragment } from '../create-element';
-import { diffChildren, toChildArray } from './children';
-import { diffProps } from './props';
+import { diffChildren } from './children';
+import { diffProps, setProperty } from './props';
 import { assign, removeNode } from '../util';
 import options from '../options';
 
@@ -11,12 +11,12 @@ import options from '../options';
  * @param {import('../internal').PreactElement} parentDom The parent of the DOM element
  * @param {import('../internal').VNode} newVNode The new virtual node
  * @param {import('../internal').VNode} oldVNode The old virtual node
- * @param {object} context The current context object
+ * @param {object} globalContext The current context object. Modified by getChildContext
  * @param {boolean} isSvg Whether or not this element is an SVG node
  * @param {Array<import('../internal').PreactElement>} excessDomChildren
  * @param {Array<import('../internal').Component>} commitQueue List of components
  * which have callbacks to invoke in commitRoot
- * @param {Element | Text} oldDom The current attached DOM
+ * @param {import('../internal').PreactElement} oldDom The current attached DOM
  * element any new dom elements should be placed around. Likely `null` on first
  * render (except when hydrating). Can be a sibling DOM element when diffing
  * Fragments that have siblings. In most cases, it starts out as `oldChildren[0]._dom`.
@@ -26,7 +26,7 @@ export function diff(
 	parentDom,
 	newVNode,
 	oldVNode,
-	context,
+	globalContext,
 	isSvg,
 	excessDomChildren,
 	commitQueue,
@@ -40,22 +40,31 @@ export function diff(
 	// constructor as undefined. This to prevent JSON-injection.
 	if (newVNode.constructor !== undefined) return null;
 
+	// If the previous diff bailed out, resume creating/hydrating.
+	if (oldVNode._hydrating != null) {
+		isHydrating = oldVNode._hydrating;
+		oldDom = newVNode._dom = oldVNode._dom;
+		// if we resume, we want the tree to be "unlocked"
+		newVNode._hydrating = null;
+		excessDomChildren = [oldDom];
+	}
+
 	if ((tmp = options._diff)) tmp(newVNode);
 
 	try {
-		outer: if (typeof newType === 'function') {
+		outer: if (typeof newType == 'function') {
 			let c, isNew, oldProps, oldState, snapshot, clearProcessingException;
 			let newProps = newVNode.props;
 
 			// Necessary for createContext api. Setting this property will pass
 			// the context value as `this.context` just for this component.
 			tmp = newType.contextType;
-			let provider = tmp && context[tmp._id];
-			let cctx = tmp
+			let provider = tmp && globalContext[tmp._id];
+			let componentContext = tmp
 				? provider
 					? provider.props.value
 					: tmp._defaultValue
-				: context;
+				: globalContext;
 
 			// Get component and set it to `c`
 			if (oldVNode._component) {
@@ -64,9 +73,11 @@ export function diff(
 			} else {
 				// Instantiate the new component
 				if ('prototype' in newType && newType.prototype.render) {
-					newVNode._component = c = new newType(newProps, cctx); // eslint-disable-line new-cap
+					// @ts-ignore The check above verifies that newType is suppose to be constructed
+					newVNode._component = c = new newType(newProps, componentContext); // eslint-disable-line new-cap
 				} else {
-					newVNode._component = c = new Component(newProps, cctx);
+					// @ts-ignore Trust me, Component implements the interface we want
+					newVNode._component = c = new Component(newProps, componentContext);
 					c.constructor = newType;
 					c.render = doRender;
 				}
@@ -74,8 +85,8 @@ export function diff(
 
 				c.props = newProps;
 				if (!c.state) c.state = {};
-				c.context = cctx;
-				c._context = context;
+				c.context = componentContext;
+				c._globalContext = globalContext;
 				isNew = c._dirty = true;
 				c._renderCallbacks = [];
 			}
@@ -113,36 +124,41 @@ export function diff(
 			} else {
 				if (
 					newType.getDerivedStateFromProps == null &&
-					c._force == null &&
+					newProps !== oldProps &&
 					c.componentWillReceiveProps != null
 				) {
-					c.componentWillReceiveProps(newProps, cctx);
+					c.componentWillReceiveProps(newProps, componentContext);
 				}
 
 				if (
-					!c._force &&
-					c.shouldComponentUpdate != null &&
-					c.shouldComponentUpdate(newProps, c._nextState, cctx) === false
+					(!c._force &&
+						c.shouldComponentUpdate != null &&
+						c.shouldComponentUpdate(
+							newProps,
+							c._nextState,
+							componentContext
+						) === false) ||
+					newVNode._original === oldVNode._original
 				) {
 					c.props = newProps;
 					c.state = c._nextState;
-					c._dirty = false;
+					// More info about this here: https://gist.github.com/JoviDeCroock/bec5f2ce93544d2e6070ef8e0036e4e8
+					if (newVNode._original !== oldVNode._original) c._dirty = false;
 					c._vnode = newVNode;
 					newVNode._dom = oldVNode._dom;
 					newVNode._children = oldVNode._children;
+					newVNode._children.forEach(vnode => {
+						if (vnode) vnode._parent = newVNode;
+					});
 					if (c._renderCallbacks.length) {
 						commitQueue.push(c);
 					}
-					for (tmp = 0; tmp < newVNode._children.length; tmp++) {
-						if (newVNode._children[tmp]) {
-							newVNode._children[tmp]._parent = newVNode;
-						}
-					}
+
 					break outer;
 				}
 
 				if (c.componentWillUpdate != null) {
-					c.componentWillUpdate(newProps, c._nextState, cctx);
+					c.componentWillUpdate(newProps, c._nextState, componentContext);
 				}
 
 				if (c.componentDidUpdate != null) {
@@ -152,7 +168,7 @@ export function diff(
 				}
 			}
 
-			c.context = cctx;
+			c.context = componentContext;
 			c.props = newProps;
 			c.state = c._nextState;
 
@@ -163,25 +179,28 @@ export function diff(
 			c._parentDom = parentDom;
 
 			tmp = c.render(c.props, c.state, c.context);
-			let isTopLevelFragment =
-				tmp != null && tmp.type == Fragment && tmp.key == null;
-			newVNode._children = toChildArray(
-				isTopLevelFragment ? tmp.props.children : tmp
-			);
+
+			// Handle setState called in render, see #2553
+			c.state = c._nextState;
 
 			if (c.getChildContext != null) {
-				context = assign(assign({}, context), c.getChildContext());
+				globalContext = assign(assign({}, globalContext), c.getChildContext());
 			}
 
 			if (!isNew && c.getSnapshotBeforeUpdate != null) {
 				snapshot = c.getSnapshotBeforeUpdate(oldProps, oldState);
 			}
 
+			let isTopLevelFragment =
+				tmp != null && tmp.type === Fragment && tmp.key == null;
+			let renderResult = isTopLevelFragment ? tmp.props.children : tmp;
+
 			diffChildren(
 				parentDom,
+				Array.isArray(renderResult) ? renderResult : [renderResult],
 				newVNode,
 				oldVNode,
-				context,
+				globalContext,
 				isSvg,
 				excessDomChildren,
 				commitQueue,
@@ -191,6 +210,9 @@ export function diff(
 
 			c.base = newVNode._dom;
 
+			// We successfully rendered this VNode, unset any stored hydration/bailout state:
+			newVNode._hydrating = null;
+
 			if (c._renderCallbacks.length) {
 				commitQueue.push(c);
 			}
@@ -199,13 +221,19 @@ export function diff(
 				c._pendingError = c._processingException = null;
 			}
 
-			c._force = null;
+			c._force = false;
+		} else if (
+			excessDomChildren == null &&
+			newVNode._original === oldVNode._original
+		) {
+			newVNode._children = oldVNode._children;
+			newVNode._dom = oldVNode._dom;
 		} else {
 			newVNode._dom = diffElementNodes(
 				oldVNode._dom,
 				newVNode,
 				oldVNode,
-				context,
+				globalContext,
 				isSvg,
 				excessDomChildren,
 				commitQueue,
@@ -215,10 +243,17 @@ export function diff(
 
 		if ((tmp = options.diffed)) tmp(newVNode);
 	} catch (e) {
+		newVNode._original = null;
+		// if hydrating or creating initial tree, bailout preserves DOM:
+		if (isHydrating || excessDomChildren != null) {
+			newVNode._dom = oldDom;
+			newVNode._hydrating = !!isHydrating;
+			excessDomChildren[excessDomChildren.indexOf(oldDom)] = null;
+			// ^ could possibly be simplified to:
+			// excessDomChildren.length = 0;
+		}
 		options._catchError(e, newVNode, oldVNode);
 	}
-
-	return newVNode._dom;
 }
 
 /**
@@ -231,9 +266,11 @@ export function commitRoot(commitQueue, root) {
 
 	commitQueue.some(c => {
 		try {
+			// @ts-ignore Reuse the commitQueue variable here so the type changes
 			commitQueue = c._renderCallbacks;
 			c._renderCallbacks = [];
 			commitQueue.some(cb => {
+				// @ts-ignore See above ts-ignore on commitQueue
 				cb.call(c);
 			});
 		} catch (e) {
@@ -248,7 +285,7 @@ export function commitRoot(commitQueue, root) {
  * the virtual nodes being diffed
  * @param {import('../internal').VNode} newVNode The new virtual node
  * @param {import('../internal').VNode} oldVNode The old virtual node
- * @param {object} context The current context object
+ * @param {object} globalContext The current context object
  * @param {boolean} isSvg Whether or not this DOM node is an SVG node
  * @param {*} excessDomChildren
  * @param {Array<import('../internal').Component>} commitQueue List of components
@@ -260,28 +297,31 @@ function diffElementNodes(
 	dom,
 	newVNode,
 	oldVNode,
-	context,
+	globalContext,
 	isSvg,
 	excessDomChildren,
 	commitQueue,
 	isHydrating
 ) {
-	let i;
 	let oldProps = oldVNode.props;
 	let newProps = newVNode.props;
+	let nodeType = newVNode.type;
+	let i = 0;
 
 	// Tracks entering and exiting SVG namespace when descending through the tree.
-	isSvg = newVNode.type === 'svg' || isSvg;
+	if (nodeType === 'svg') isSvg = true;
 
-	if (dom == null && excessDomChildren != null) {
-		for (i = 0; i < excessDomChildren.length; i++) {
+	if (excessDomChildren != null) {
+		for (; i < excessDomChildren.length; i++) {
 			const child = excessDomChildren[i];
 
+			// if newVNode matches an element in excessDomChildren or the `dom`
+			// argument matches an element in excessDomChildren, remove it from
+			// excessDomChildren so it isn't later removed in diffChildren
 			if (
-				child != null &&
-				(newVNode.type === null
-					? child.nodeType === 3
-					: child.localName === newVNode.type)
+				child &&
+				(child === dom ||
+					(nodeType ? child.localName == nodeType : child.nodeType == 3))
 			) {
 				dom = child;
 				excessDomChildren[i] = null;
@@ -291,28 +331,40 @@ function diffElementNodes(
 	}
 
 	if (dom == null) {
-		if (newVNode.type === null) {
+		if (nodeType === null) {
+			// @ts-ignore createTextNode returns Text, we expect PreactElement
 			return document.createTextNode(newProps);
 		}
-		dom = isSvg
-			? document.createElementNS('http://www.w3.org/2000/svg', newVNode.type)
-			: document.createElement(newVNode.type);
+
+		if (isSvg) {
+			dom = document.createElementNS(
+				'http://www.w3.org/2000/svg',
+				// @ts-ignore We know `newVNode.type` is a string
+				nodeType
+			);
+		} else {
+			dom = document.createElement(
+				// @ts-ignore We know `newVNode.type` is a string
+				nodeType,
+				newProps.is && newProps
+			);
+		}
+
 		// we created a new parent, so none of the previously attached children can be reused:
 		excessDomChildren = null;
+		// we are creating a new node, so we can assume this is a new subtree (in case we are hydrating), this deopts the hydrate
+		isHydrating = false;
 	}
 
-	if (newVNode.type === null) {
-		if (excessDomChildren != null) {
-			excessDomChildren[excessDomChildren.indexOf(dom)] = null;
-		}
-
-		if (oldProps !== newProps) {
+	if (nodeType === null) {
+		// During hydration, we still have to split merged text from SSR'd HTML.
+		if (oldProps !== newProps && (!isHydrating || dom.data !== newProps)) {
 			dom.data = newProps;
 		}
-	} else if (newVNode !== oldVNode) {
-		if (excessDomChildren != null) {
-			excessDomChildren = EMPTY_ARR.slice.call(dom.childNodes);
-		}
+	} else {
+		// If excessDomChildren was not null, repopulate it with the current element's children:
+		excessDomChildren =
+			excessDomChildren && EMPTY_ARR.slice.call(dom.childNodes);
 
 		oldProps = oldVNode.props || EMPTY_OBJ;
 
@@ -322,7 +374,9 @@ function diffElementNodes(
 		// During hydration, props are not diffed at all (including dangerouslySetInnerHTML)
 		// @TODO we should warn in debug mode when props don't match here.
 		if (!isHydrating) {
-			if (oldProps === EMPTY_OBJ) {
+			// But, if we are in a situation where we are using existing DOM (e.g. replaceNode)
+			// we should read the existing DOM attributes to diff them
+			if (excessDomChildren != null) {
 				oldProps = {};
 				for (let i = 0; i < dom.attributes.length; i++) {
 					oldProps[dom.attributes[i].name] = dom.attributes[i].value;
@@ -331,7 +385,11 @@ function diffElementNodes(
 
 			if (newHtml || oldHtml) {
 				// Avoid re-applying the same '__html' if it did not changed between re-render
-				if (!newHtml || !oldHtml || newHtml.__html != oldHtml.__html) {
+				if (
+					!newHtml ||
+					((!oldHtml || newHtml.__html != oldHtml.__html) &&
+						newHtml.__html !== dom.innerHTML)
+				) {
 					dom.innerHTML = (newHtml && newHtml.__html) || '';
 				}
 			}
@@ -339,38 +397,51 @@ function diffElementNodes(
 
 		diffProps(dom, newProps, oldProps, isSvg, isHydrating);
 
-		newVNode._children = newVNode.props.children;
-
 		// If the new vnode didn't have dangerouslySetInnerHTML, diff its children
-		if (!newHtml) {
+		if (newHtml) {
+			newVNode._children = [];
+		} else {
+			i = newVNode.props.children;
 			diffChildren(
 				dom,
+				Array.isArray(i) ? i : [i],
 				newVNode,
 				oldVNode,
-				context,
-				newVNode.type === 'foreignObject' ? false : isSvg,
+				globalContext,
+				isSvg && nodeType !== 'foreignObject',
 				excessDomChildren,
 				commitQueue,
-				EMPTY_OBJ,
+				dom.firstChild,
 				isHydrating
 			);
+
+			// Remove children that are not part of any vnode.
+			if (excessDomChildren != null) {
+				for (i = excessDomChildren.length; i--; ) {
+					if (excessDomChildren[i] != null) removeNode(excessDomChildren[i]);
+				}
+			}
 		}
 
 		// (as above, don't diff props during hydration)
 		if (!isHydrating) {
 			if (
 				'value' in newProps &&
-				newProps.value !== undefined &&
-				newProps.value !== dom.value
+				(i = newProps.value) !== undefined &&
+				// #2756 For the <progress>-element the initial value is 0,
+				// despite the attribute not being present. When the attribute
+				// is missing the progress bar is treated as indeterminate.
+				// To fix that we'll always update it when it is 0 for progress elements
+				(i !== dom.value || (nodeType === 'progress' && !i))
 			) {
-				dom.value = newProps.value == null ? '' : newProps.value;
+				setProperty(dom, 'value', i, oldProps.value, false);
 			}
 			if (
 				'checked' in newProps &&
-				newProps.checked !== undefined &&
-				newProps.checked !== dom.checked
+				(i = newProps.checked) !== undefined &&
+				i !== dom.checked
 			) {
-				dom.checked = newProps.checked;
+				setProperty(dom, 'checked', i, oldProps.checked, false);
 			}
 		}
 	}
@@ -406,15 +477,17 @@ export function unmount(vnode, parentVNode, skipRemove) {
 	if (options.unmount) options.unmount(vnode);
 
 	if ((r = vnode.ref)) {
-		applyRef(r, null, parentVNode);
+		if (!r.current || r.current === vnode._dom) applyRef(r, null, parentVNode);
 	}
 
 	let dom;
-	if (!skipRemove && typeof vnode.type !== 'function') {
+	if (!skipRemove && typeof vnode.type != 'function') {
 		skipRemove = (dom = vnode._dom) != null;
 	}
 
-	vnode._dom = vnode._lastDomChild = null;
+	// Must be set to `undefined` to properly clean up `_nextDom`
+	// for which `null` is a valid value. See comment in `create-element.js`
+	vnode._dom = vnode._nextDom = undefined;
 
 	if ((r = vnode._component) != null) {
 		if (r.componentWillUnmount) {

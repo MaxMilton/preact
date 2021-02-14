@@ -1,6 +1,6 @@
 import { setupRerender } from 'preact/test-utils';
 import { createElement, render, Component } from 'preact';
-import { setupScratch, teardown, spyAll } from '../../_util/helpers';
+import { setupScratch, teardown } from '../../_util/helpers';
 
 /** @jsx createElement */
 
@@ -210,11 +210,7 @@ describe('Lifecycle methods', () => {
 		]);
 	});
 
-	let _it = it;
 	describe('#constructor and component(Did|Will)(Mount|Unmount)', () => {
-		/* global DISABLE_FLAKEY */
-		let it = DISABLE_FLAKEY ? xit : _it;
-
 		let setState;
 		class Outer extends Component {
 			constructor(p, c) {
@@ -580,6 +576,43 @@ describe('Lifecycle methods', () => {
 			expect(proto.componentDidMount).to.have.been.called;
 		});
 
+		it('should be able to use getDerivedStateFromError and componentDidCatch together', () => {
+			let didCatch = sinon.spy(),
+				getDerived = sinon.spy();
+			const error = new Error('hi');
+
+			class Boundary extends Component {
+				static getDerivedStateFromError(err) {
+					getDerived(err);
+					return { err };
+				}
+
+				componentDidCatch(err) {
+					didCatch(err);
+				}
+
+				render() {
+					return this.state.err ? <div /> : this.props.children;
+				}
+			}
+
+			const ThrowErr = () => {
+				throw error;
+			};
+
+			render(
+				<Boundary>
+					<ThrowErr />
+				</Boundary>,
+				scratch
+			);
+			rerender();
+
+			expect(didCatch).to.have.been.calledWith(error);
+
+			expect(getDerived).to.have.been.calledWith(error);
+		});
+
 		it('should remove this.base for HOC', () => {
 			let createComponent = (name, fn) => {
 				class C extends Component {
@@ -594,7 +627,8 @@ describe('Lifecycle methods', () => {
 						return fn(props);
 					}
 				}
-				spyAll(C.prototype);
+				sinon.spy(C.prototype, 'componentWillUnmount');
+				sinon.spy(C.prototype, 'render');
 				return C;
 			};
 

@@ -14,7 +14,11 @@ declare namespace preact {
 		type: ComponentType<P> | string;
 		props: P & { children: ComponentChildren };
 		key: Key;
-		ref: Ref<any> | null;
+		/**
+		 * ref is not guaranteed by React.ReactElement, for compatibility reasons
+		 * with popular react libs we define it as optional too
+		 */
+		ref?: Ref<any> | null;
 		/**
 		 * The time this `vnode` started rendering. Will only be set when
 		 * the devtools are attached.
@@ -35,7 +39,7 @@ declare namespace preact {
 
 	type Key = string | number | any;
 
-	type RefObject<T> = { current?: T | null };
+	type RefObject<T> = { current: T | null };
 	type RefCallback<T> = (instance: T | null) => void;
 	type Ref<T> = RefObject<T> | RefCallback<T>;
 
@@ -44,6 +48,7 @@ declare namespace preact {
 		| object
 		| string
 		| number
+		| bigint
 		| boolean
 		| null
 		| undefined;
@@ -65,12 +70,19 @@ declare namespace preact {
 		};
 	}
 
-	type RenderableProps<P, RefType = any> = Readonly<
-		P & Attributes & { children?: ComponentChildren; ref?: Ref<RefType> }
-	>;
+	type RenderableProps<P, RefType = any> = P &
+		Readonly<Attributes & { children?: ComponentChildren; ref?: Ref<RefType> }>;
 
 	type ComponentType<P = {}> = ComponentClass<P> | FunctionComponent<P>;
 	type ComponentFactory<P = {}> = ComponentType<P>;
+
+	type ComponentProps<
+		C extends ComponentType<any> | keyof JSXInternal.IntrinsicElements
+	> = C extends ComponentType<infer P>
+		? P
+		: C extends keyof JSXInternal.IntrinsicElements
+		? JSXInternal.IntrinsicElements[C]
+		: never;
 
 	interface FunctionComponent<P = {}> {
 		(props: RenderableProps<P>, context?: any): VNode<any> | null;
@@ -83,6 +95,7 @@ declare namespace preact {
 		new (props: P, context?: any): Component<P, S>;
 		displayName?: string;
 		defaultProps?: Partial<P>;
+		contextType?: Context<any>;
 		getDerivedStateFromProps?(
 			props: Readonly<P>,
 			state: Readonly<S>
@@ -172,15 +185,15 @@ declare namespace preact {
 	function createElement(
 		type: string,
 		props:
-			| JSXInternal.HTMLAttributes &
+			| (JSXInternal.HTMLAttributes &
 					JSXInternal.SVGAttributes &
-					Record<string, any>
+					Record<string, any>)
 			| null,
 		...children: ComponentChildren[]
 	): VNode<any>;
 	function createElement<P>(
 		type: ComponentType<P>,
-		props: Attributes & P | null,
+		props: (Attributes & P) | null,
 		...children: ComponentChildren[]
 	): VNode<any>;
 	namespace createElement {
@@ -190,15 +203,15 @@ declare namespace preact {
 	function h(
 		type: string,
 		props:
-			| JSXInternal.HTMLAttributes &
+			| (JSXInternal.HTMLAttributes &
 					JSXInternal.SVGAttributes &
-					Record<string, any>
+					Record<string, any>)
 			| null,
 		...children: ComponentChildren[]
 	): VNode<any>;
 	function h<P>(
 		type: ComponentType<P>,
-		props: Attributes & P | null,
+		props: (Attributes & P) | null,
 		...children: ComponentChildren[]
 	): VNode<any>;
 	namespace h {
@@ -219,10 +232,15 @@ declare namespace preact {
 		parent: Element | Document | ShadowRoot | DocumentFragment
 	): void;
 	function cloneElement(
-		vnode: JSX.Element,
+		vnode: VNode<any>,
 		props?: any,
 		...children: ComponentChildren[]
-	): JSX.Element;
+	): VNode<any>;
+	function cloneElement<P>(
+		vnode: VNode<P>,
+		props?: any,
+		...children: ComponentChildren[]
+	): VNode<P>;
 
 	//
 	// Preact Built-in Components
@@ -245,10 +263,13 @@ declare namespace preact {
 		unmount?(vnode: VNode): void;
 		/** Attach a hook that is invoked after a vnode has rendered. */
 		diffed?(vnode: VNode): void;
-		event?(e: Event): void;
+		event?(e: Event): any;
 		requestAnimationFrame?: typeof requestAnimationFrame;
 		debounceRendering?(cb: () => void): void;
 		useDebugValue?(value: string | number): void;
+		_addHookName?(name: string | number): void;
+		__suspenseDidResolve?(vnode: VNode, cb: () => void): void;
+		// __canSuspenseResolve?(vnode: VNode, cb: () => void): void;
 	}
 
 	const options: Options;
@@ -281,6 +302,7 @@ declare namespace preact {
 	interface Context<T> {
 		Consumer: Consumer<T>;
 		Provider: Provider<T>;
+		displayName?: string;
 	}
 	interface PreactContext<T> extends Context<T> {}
 
